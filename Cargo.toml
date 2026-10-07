@@ -1,0 +1,11 @@
+[package]
+name = "cozy-go"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+rust-version = "1.96"
+description = "no_std rules for Go and Gomoku"
+
+[lib]
+name = "cozy_go"
+path = "src/lib.rs"
