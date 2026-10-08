@@ -6,6 +6,18 @@ license = "Apache-2.0"
 rust-version = "1.96"
 description = "no_std rules for Go and Gomoku"
 
+[workspace]
+resolver = "3"
+members = ["bindings/web"]
+
 [lib]
 name = "cozy_go"
 path = "src/lib.rs"
+
+[profile.web]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

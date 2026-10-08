@@ -45,3 +45,7 @@ if let (Some(mut game), Some(point)) = (Game::new(19, 13), Point::from_xy(19, 3,
 
 The library implements rules and position helpers only. State serialization, player IDs,
 network protocol, and board rendering belong to the caller.
+
+The [web bridge](bindings/web/README.md) builds the Go rules for browsers and Node.js with
+`node scripts/build-web.mjs`. It also exposes groups, liberties, and territory ownership so
+an application can use the same rules for moves and scoring displays.

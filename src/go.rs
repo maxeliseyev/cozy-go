@@ -134,11 +134,11 @@ impl Board {
             if next.get(neighbor) != Some(opponent) || examined.contains(neighbor) {
                 continue;
             }
-            let (group, has_liberty) = next.group_and_liberties(neighbor, opponent);
+            let (group, liberties) = next.group_and_liberties(neighbor, opponent);
             for &stone in &group {
                 examined.insert(stone);
             }
-            if !has_liberty {
+            if liberties.count() == 0 {
                 captured.extend(group);
             }
         }
@@ -147,8 +147,8 @@ impl Board {
             next.remove_stone(opponent, stone);
         }
 
-        let (_, has_liberty) = next.group_and_liberties(point, color);
-        if !has_liberty {
+        let (_, liberties) = next.group_and_liberties(point, color);
+        if liberties.count() == 0 {
             return Err(Illegal::Suicide);
         }
 
@@ -164,6 +164,61 @@ impl Board {
             .map(|color| self.group_and_liberties(point, color).0)
             .unwrap_or_default();
         stones.into_iter()
+    }
+
+    /// Iterates over the distinct liberties of the group at `point` in ascending point order.
+    /// An empty or off-board point yields an empty iterator.
+    pub fn liberties(&self, point: Point) -> impl Iterator<Item = Point> + '_ {
+        let liberties = self
+            .get(point)
+            .map(|color| self.group_and_liberties(point, color).1)
+            .unwrap_or_default();
+        self.points()
+            .filter(move |point| liberties.contains(*point))
+    }
+
+    /// Calculates Chinese area and territory ownership after removing the supplied dead stones.
+    /// Off-board and empty points are ignored. This calculation excludes komi.
+    #[must_use]
+    pub fn area(&self, dead: &[Point]) -> Area {
+        let mut board = self.clone();
+        for &point in dead {
+            if let Some(color) = board.get(point) {
+                board.remove_stone(color, point);
+            }
+        }
+
+        let mut visited = BitSet::default();
+        let mut black = board.black.count();
+        let mut white = board.white.count();
+        let mut territory = vec![None; usize::from(board.size) * usize::from(board.size)];
+        for start in board.points() {
+            if board.get(start).is_some() || visited.contains(start) {
+                continue;
+            }
+            let (region, touches_black, touches_white) = empty_region(&board, start, &mut visited);
+            let owner = match (touches_black, touches_white) {
+                (true, false) => {
+                    black += region.len() as u32;
+                    Some(Color::Black)
+                }
+                (false, true) => {
+                    white += region.len() as u32;
+                    Some(Color::White)
+                }
+                _ => None,
+            };
+            for point in region {
+                if let Some(slot) = territory.get_mut(usize::from(point.index())) {
+                    *slot = owner;
+                }
+            }
+        }
+        Area {
+            black,
+            white,
+            territory,
+        }
     }
 
     /// Returns the deterministic Zobrist hash of stones, independent of the player to move.
@@ -218,22 +273,20 @@ impl Board {
         ]
     }
 
-    fn group_and_liberties(&self, start: Point, color: Color) -> (Vec<Point>, bool) {
-        let mut group = Vec::new();
+    fn group_and_liberties(&self, start: Point, color: Color) -> (Vec<Point>, BitSet) {
+        let mut group = vec![start];
         let mut stack = vec![start];
         let mut visited = BitSet::default();
         let mut liberties = BitSet::default();
+        visited.insert(start);
 
         while let Some(point) = stack.pop() {
-            if !visited.insert(point) {
-                continue;
-            }
-            group.push(point);
             for neighbor in self.neighbors(point).into_iter().flatten() {
                 match self.get(neighbor) {
                     Some(found) if found == color => {
-                        if !visited.contains(neighbor) {
+                        if visited.insert(neighbor) {
                             stack.push(neighbor);
+                            group.push(neighbor);
                         }
                     }
                     None => {
@@ -244,7 +297,7 @@ impl Board {
             }
         }
 
-        (group, liberties.count() > 0)
+        (group, liberties)
     }
 }
 
@@ -394,33 +447,29 @@ impl Game {
     /// `white_half_points`; Black's score is returned in whole points.
     #[must_use]
     pub fn area_score(&self, dead: &[Point]) -> Score {
-        let mut board = self.board.clone();
-        for &point in dead {
-            if let Some(color) = board.get(point) {
-                board.remove_stone(color, point);
-            }
-        }
-
-        let mut visited = BitSet::default();
-        let mut black_territory = 0_u32;
-        let mut white_territory = 0_u32;
-        for start in board.points() {
-            if board.get(start).is_some() || visited.contains(start) {
-                continue;
-            }
-            let (area, touches_black, touches_white) = empty_region(&board, start, &mut visited);
-            match (touches_black, touches_white) {
-                (true, false) => black_territory += area,
-                (false, true) => white_territory += area,
-                _ => {}
-            }
-        }
-
+        let area = self.board.area(dead);
         Score {
-            black: board.black.count() + black_territory,
-            white_half_points: (board.white.count() + white_territory) * 2
-                + self.komi_half_points as u32,
+            black: area.black,
+            white_half_points: area.white * 2 + self.komi_half_points as u32,
         }
+    }
+}
+
+/// Chinese area before komi, including the owner of each empty intersection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Area {
+    /// Black stones plus Black territory.
+    pub black: u32,
+    /// White stones plus White territory.
+    pub white: u32,
+    territory: Vec<Option<Color>>,
+}
+
+impl Area {
+    /// Territory ownership in row-major order. Occupied and neutral points contain `None`.
+    #[must_use]
+    pub fn territory(&self) -> &[Option<Color>] {
+        &self.territory
     }
 }
 
@@ -433,15 +482,15 @@ pub struct Score {
     pub white_half_points: u32,
 }
 
-fn empty_region(board: &Board, start: Point, visited: &mut BitSet) -> (u32, bool, bool) {
+fn empty_region(board: &Board, start: Point, visited: &mut BitSet) -> (Vec<Point>, bool, bool) {
     let mut stack = vec![start];
     visited.insert(start);
-    let mut area = 0_u32;
+    let mut area = Vec::new();
     let mut touches_black = false;
     let mut touches_white = false;
 
     while let Some(point) = stack.pop() {
-        area += 1;
+        area.push(point);
         for neighbor in board.neighbors(point).into_iter().flatten() {
             match board.get(neighbor) {
                 Some(Color::Black) => touches_black = true,

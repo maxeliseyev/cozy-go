@@ -1,0 +1,7 @@
+{
+  "abiVersion": 1,
+  "rustc": "rustc 1.96.0 (ac68faa20 2026-05-25)",
+  "sourceSha256": "8f3da124e2980803c3b58c08cb8a8bea771a9fe50c7087a7772529126a031ab7",
+  "wasmSha256": "ed4c985366c89a9dbb08dae93bc24b8517fac9264165dfec4497971fa8e7f97f",
+  "wasmBytes": 28270
+}
