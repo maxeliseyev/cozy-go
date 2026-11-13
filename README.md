@@ -5,7 +5,7 @@ on the Konstruct game SDK; the SDK's `games/go` and `games/gomoku` crates can us
 rules layer.
 
 The crate is `no_std` and uses `alloc`, with no third-party dependencies, floating-point
-arithmetic, runtime randomness, or hash maps. It targets Rust 1.96.0 and
+arithmetic, runtime randomness, or hash maps. It targets Rust 1.100.0 and
 `wasm32-unknown-unknown`.
 
 ## Go
